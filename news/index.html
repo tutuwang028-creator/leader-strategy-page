@@ -50,6 +50,12 @@
     .stock-link:hover { color:var(--blue); text-decoration:underline; }
     .rank-no { width:54px; text-align:center; color:var(--muted); }
     .empty { text-align:center; color:#526575; }
+    .result-panel { margin:8px 0; border:1px solid var(--line); border-radius:6px; background:#111923; padding:8px; display:none; }
+    .result-panel h2 { margin:0 0 6px; font-size:14px; }
+    .result-item { border-top:1px solid #263645; padding:7px 0; cursor:pointer; }
+    .result-item:first-of-type { border-top:0; }
+    .result-item b { color:var(--red); }
+    .result-item small { display:block; color:var(--muted); margin-top:2px; }
     @media (max-width:1000px) { .app { grid-template-columns:1fr; height:auto; } .pane { min-height:420px; } .table-wrap { height:auto; } .head { align-items:stretch; flex-direction:column; } .toolbar { width:100%; align-items:stretch; } }
   </style>
 </head>
@@ -63,13 +69,14 @@
       <select id="dateSelect"></select>
     </div>
     <div class="body">
-      <input id="filterInput" style="width:100%;margin-bottom:8px" placeholder="筛选板块名称 / 代码" />
+      <input id="filterInput" style="width:100%;margin-bottom:8px" placeholder="筛选板块 / 股票" />
       <div class="fav-controls">
         <button id="favoriteOnlyBtn" class="mini-btn" type="button">只看收藏</button>
         <span id="favoriteCount" class="muted"></span>
       </div>
       <div class="muted" style="margin-bottom:8px">红色：排名上升或新出现；绿色：排名下跌；白色：不变。</div>
-      <div id="industryList" class="industry-list"></div>
+      <div id="searchPanel" class="result-panel"></div>
+        <div id="industryList" class="industry-list"></div>
     </div>
   </section>
   <section class="pane">
@@ -107,6 +114,7 @@ const industryList = document.getElementById("industryList");
 const filterInput = document.getElementById("filterInput");
 const favoriteOnlyBtn = document.getElementById("favoriteOnlyBtn");
 const favoriteCount = document.getElementById("favoriteCount");
+const searchPanel = document.getElementById("searchPanel");
 const industryTitle = document.getElementById("industryTitle");
 const industryNote = document.getElementById("industryNote");
 const ladderWrap = document.getElementById("ladderWrap");
@@ -153,6 +161,31 @@ function windowDates(date) {
   if (startIdx < 0 || endIdx < 0) { const idx = DATES.indexOf(date); return DATES.slice(Math.max(0, idx - 9), idx + 1); }
   return DATES.slice(startIdx, endIdx + 1);
 }
+
+function stockMatches(date,q){
+  if(!q)return [];
+  const seen=new Set(), key=q.toLowerCase(), out=[];
+  for(const r of rowsByDate(date)){
+    const hit=String(r.name||"").toLowerCase().includes(key)||String(r.symbol||"").includes(key);
+    if(!hit)continue;
+    const id=`${r.industryCode}|${r.symbol}|${r.stockRank}`;
+    if(seen.has(id))continue;
+    seen.add(id);
+    out.push(r);
+  }
+  return out.sort((a,b)=>(a.industryRank??9999)-(b.industryRank??9999)||(a.stockRank??9999)-(b.stockRank??9999));
+}
+function renderSearchResults(matches,q){
+  if(!q){searchPanel.style.display="none";searchPanel.innerHTML="";return;}
+  searchPanel.style.display="block";
+  if(!matches.length){searchPanel.innerHTML=`<h2>股票查询</h2><div class="muted">当前日期未命中：${q}</div>`;return;}
+  searchPanel.innerHTML=`<h2>股票查询｜${matches.length} 条</h2>`+matches.slice(0,30).map(r=>`<div class="result-item" data-code="${r.industryCode}">
+    <b>${r.name} ${r.symbol}</b>
+    <small>${r.industryRank}. ${r.industryName}｜${r.industryCode}｜身位 ${r.stockRank}</small>
+  </div>`).join("");
+  searchPanel.querySelectorAll(".result-item").forEach(item=>item.addEventListener("click",()=>{selectedIndustry=item.dataset.code;renderIndustries();renderStocks();}));
+}
+
 function previousIndustryRank(code, date) {
   const prev = prevDateOf(date);
   if (!prev) return null;
@@ -174,7 +207,9 @@ function renderDates() {
 }
 function renderIndustries() {
   const q = filterInput.value.trim().toLowerCase();
-  const list = uniqueIndustries(selectedDate).filter(r => !q || r.industryName.toLowerCase().includes(q) || r.industryCode.includes(q));
+  const matches = stockMatches(selectedDate, q);
+  renderSearchResults(matches, q);
+  const list = uniqueIndustries(selectedDate).filter(r => !q || r.industryName.toLowerCase().includes(q) || r.industryCode.includes(q) || matches.some(m => m.industryCode === r.industryCode));
   if (!selectedIndustry || !list.some(r => r.industryCode === selectedIndustry)) selectedIndustry = list[0]?.industryCode || "";
   industryList.innerHTML = list.map(r => {
     const prevRank = previousIndustryRank(r.industryCode, selectedDate);
@@ -251,7 +286,9 @@ function renderCycleGain(code, ds) {
 }
 function renderIndustriesWithFavorites() {
   const q = filterInput.value.trim().toLowerCase();
-  let list = uniqueIndustries(selectedDate).filter(r => !q || r.industryName.toLowerCase().includes(q) || r.industryCode.includes(q));
+  const matches = stockMatches(selectedDate, q);
+  renderSearchResults(matches, q);
+  let list = uniqueIndustries(selectedDate).filter(r => !q || r.industryName.toLowerCase().includes(q) || r.industryCode.includes(q) || matches.some(m => m.industryCode === r.industryCode));
   if (showFavoritesOnly) list = list.filter(r => isFavorite(r.industryCode));
   if (!selectedIndustry || !list.some(r => r.industryCode === selectedIndustry)) selectedIndustry = list[0]?.industryCode || "";
   favoriteOnlyBtn.classList.toggle("active", showFavoritesOnly);
