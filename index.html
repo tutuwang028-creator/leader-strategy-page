@@ -129,6 +129,12 @@ function toggleFavorite(code) {
 function noteKey() { return `${selectedDate}|${selectedIndustry}`; }
 function fmtDate(d) { return d ? d.slice(4,6) + "-" + d.slice(6,8) : "-"; }
 function queryHref(symbol) { return '#'; }
+function clsByMove(nowRank, prevRank) {
+  if (prevRank == null) return "up";
+  if (nowRank < prevRank) return "up";
+  if (nowRank > prevRank) return "down";
+  return "flat";
+}
 function rowsByDate(date) { return DATA.filter(r => r.date === date); }
 function uniqueIndustries(date) {
   const map = new Map();
