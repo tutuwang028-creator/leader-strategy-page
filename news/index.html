@@ -56,6 +56,14 @@
     .result-item:first-of-type { border-top:0; }
     .result-item b { color:var(--red); }
     .result-item small { display:block; color:var(--muted); margin-top:2px; }
+    .gain-dashboard { display:grid; grid-template-columns:minmax(320px,0.92fr) minmax(420px,1.08fr); gap:10px; align-items:start; }
+    .gain-rank-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
+    .gain-rank-chip { border:1px solid rgba(54,65,84,.78); border-radius:6px; background:#111923; padding:6px 7px; color:var(--ink); min-width:0; }
+    .gain-rank-chip b { display:block; color:var(--red); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .gain-rank-chip small { display:block; color:var(--muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .leader-chart { border:1px solid rgba(54,65,84,.78); border-radius:6px; background:#111923; padding:8px; overflow:auto; }
+    .leader-chart svg { width:100%; min-width:440px; height:230px; display:block; }
+    @media (max-width:1100px) { .gain-dashboard { grid-template-columns:1fr; } }
     @media (max-width:1000px) { .app { grid-template-columns:1fr; height:auto; } .pane { min-height:420px; } .table-wrap { height:auto; } .head { align-items:stretch; flex-direction:column; } .toolbar { width:100%; align-items:stretch; } }
   </style>
 </head>
@@ -284,6 +292,66 @@ function renderCycleGain(code, ds) {
     gains.map((x, i) => `<span class="gain-chip">${i+1}. ${x.name} <b>${x.relGain.toFixed(1)}%</b><small>${fmtDate(x.firstDate)}→${fmtDate(x.lastDate)}｜个股 ${x.stockGain.toFixed(1)}%｜板块 ${x.industryGain.toFixed(1)}%</small></span>`).join("") +
     `</div>`;
 }
+
+function stockRowsFor(date,code){
+  return rowsByDate(date).filter(r=>r.industryCode===code).sort((a,b)=>(a.stockRank??9999)-(b.stockRank??9999));
+}
+function renderLeadershipChart(code, ds){
+  const points = ds.map((d,i)=>{
+    const ind = rowsByDate(d).find(x=>x.industryCode===code && x.showIndustry) || rowsByDate(d).find(x=>x.industryCode===code);
+    const leader = stockRowsFor(d,code).find(x=>Number(x.stockRank)===1);
+    return ind && Number.isFinite(ind.industryRank) ? {date:d, rank:Number(ind.industryRank), leader, index:i} : null;
+  }).filter(Boolean);
+  if(!points.length)return `<div class="leader-chart"><div class="muted">暂无身位数据</div></div>`;
+  const w=560,h=230,pad=34;
+  const maxRank=Math.max(20,...points.map(p=>p.rank));
+  const xOf=i=>points.length<=1?w/2:pad+i*(w-2*pad)/(points.length-1);
+  const yOf=rank=>pad+(rank-1)*(h-2*pad)/Math.max(1,maxRank-1);
+  const segs=points.slice(1).map((p,i)=>{
+    const a=points[i], hot=a.rank<=10&&p.rank<=10;
+    return `<line x1="${xOf(i).toFixed(1)}" y1="${yOf(a.rank).toFixed(1)}" x2="${xOf(i+1).toFixed(1)}" y2="${yOf(p.rank).toFixed(1)}" stroke="${hot?'#ff5a5f':'#526575'}" stroke-width="${hot?2.6:1.4}" opacity="${hot?0.95:0.55}"/>`;
+  }).join("");
+  let lastLeader="";
+  const marks=points.map((p,i)=>{
+    const x=xOf(i), y=yOf(p.rank), hot=p.rank<=10;
+    const leader=p.leader?.name||"";
+    const changed=leader && leader!==lastLeader;
+    if(leader)lastLeader=leader;
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${hot?4.5:3.2}" fill="${hot?'#ff5a5f':'#526575'}"/>`+
+      `<text x="${x.toFixed(1)}" y="${(y-9).toFixed(1)}" text-anchor="middle" fill="${hot?'#ffb2b5':'#7f8da3'}" font-size="10">${p.rank}</text>`+
+      (changed?`<text x="${x.toFixed(1)}" y="${Math.min(h-10,y+18).toFixed(1)}" text-anchor="middle" fill="#52d39a" font-size="10">${leader}</text>`:"");
+  }).join("");
+  const labels=points.map((p,i)=>`<text x="${xOf(i).toFixed(1)}" y="${h-4}" text-anchor="middle" fill="#9ca8bb" font-size="10">${fmtDate(p.date)}</text>`).join("");
+  return `<div class="leader-chart"><div class="muted" style="margin-bottom:6px">板块身位与龙头切换</div><svg viewBox="0 0 ${w} ${h}" role="img">
+    <line x1="${pad}" y1="${yOf(10).toFixed(1)}" x2="${w-pad}" y2="${yOf(10).toFixed(1)}" stroke="#ff5a5f" stroke-dasharray="5 5" opacity=".45"/>
+    <text x="${pad}" y="${(yOf(10)-5).toFixed(1)}" fill="#ff8e91" font-size="10">前10</text>
+    ${segs}${marks}${labels}
+  </svg></div>`;
+}
+function renderCycleGain(code, ds){
+  if(!ds.length)return "";
+  const currentStrong=new Set(rowsByDate(selectedDate).filter(x=>x.industryCode===code).map(x=>x.symbol));
+  const symbols=new Map();
+  for(const d of ds){
+    for(const r of rowsByDate(d).filter(x=>x.industryCode===code)){
+      if(!currentStrong.has(r.symbol))continue;
+      if(!symbols.has(r.symbol))symbols.set(r.symbol,{symbol:r.symbol,name:r.name,rows:[]});
+      if(Number.isFinite(r.close)&&Number.isFinite(r.industryClose))symbols.get(r.symbol).rows.push(r);
+    }
+  }
+  const gains=[...symbols.values()].map(x=>{
+    x.rows.sort((a,b)=>DATES.indexOf(a.date)-DATES.indexOf(b.date));
+    const first=x.rows[0],last=x.rows[x.rows.length-1];
+    if(!first||!last||first.close<=0||first.industryClose<=0)return null;
+    const stockGain=last.close/first.close-1, industryGain=last.industryClose/first.industryClose-1;
+    return {...x,firstDate:first.date,lastDate:last.date,relGain:(stockGain-industryGain)*100,stockGain:stockGain*100,industryGain:industryGain*100};
+  }).filter(Boolean).sort((a,b)=>b.relGain-a.relGain);
+  const left=gains.length?`<div><div class="muted" style="margin-bottom:6px">周期内当前强势股相对板块涨幅排名</div><div class="gain-rank-grid">`+
+    gains.map((x,i)=>`<span class="gain-rank-chip"><b>${i+1}. ${x.name}</b><small>${x.relGain.toFixed(1)}%｜${fmtDate(x.firstDate)}→${fmtDate(x.lastDate)}</small></span>`).join("")+`</div></div>`:
+    `<div class="muted">暂无涨幅排名</div>`;
+  return `<div class="gain-dashboard">${left}${renderLeadershipChart(code,ds)}</div>`;
+}
+
 function renderIndustriesWithFavorites() {
   const q = filterInput.value.trim().toLowerCase();
   const matches = stockMatches(selectedDate, q);
